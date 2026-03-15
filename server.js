@@ -6,10 +6,7 @@ const PORT = 3000;
 
 const redis = new Redis(); // connected, but not used in this step
 
-// In-memory store
-const rateLimitStore = {};
-
-function rateLimiter(req, res, next) {
+async function rateLimiter(req, res, next) {
   const userId = req.headers['user-id'];
 
   if (!userId) {
@@ -20,25 +17,35 @@ function rateLimiter(req, res, next) {
   const WINDOW_SIZE = 60 * 1000; // 60 seconds
   const MAX_REQUESTS = 5;
 
-  if (!rateLimitStore[userId]) {
-    rateLimitStore[userId] = [];
+  const key = `rate_limit:${userId}`;
+
+  try{
+    // Get timestamps from Redis
+    let timestamps = await redis.lrange(key, 0, -1);
+    timestamps = timestamps.map(Number);
+    // remove old timestamps
+    timestamps = timestamps.filter(
+      (time) => now - time < WINDOW_SIZE
+    );
+
+    if (timestamps.length >= MAX_REQUESTS) {
+      return res.status(429).send("Too many requests");
+    }
+    // add current request
+    timestamps.push(now);
+    // store updated list
+    await redis.del(key);
+    for (let t of timestamps) {
+      await redis.rpush(key, t);
+    }
+    // set expiry so Redis auto cleans
+    await redis.expire(key, 60);
+    next();
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
   }
-
-  // Filter out timestamps older than window
-  rateLimitStore[userId] = rateLimitStore[userId].filter(
-    (timestamp) => now - timestamp < WINDOW_SIZE
-  );
-
-  if (rateLimitStore[userId].length >= MAX_REQUESTS) {
-    return res.status(429).send('Too many requests, slow down!');
-  }
-
-  // Add current request timestamp
-  rateLimitStore[userId].push(now);
-  next();
 }
-
-
 
 // Apply middleware to this route
 app.get('/api/test', rateLimiter, (req, res) => {
