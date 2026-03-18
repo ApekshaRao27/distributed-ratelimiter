@@ -1,11 +1,12 @@
 const express = require('express');
 const Redis = require('ioredis'); 
-
+const dotenv = require('dotenv');
+dotenv.config();
 const app = express();
-const PORT = 3000;
-
+const PORT = process.env.PORT || 3000;
+const tokenBucketLimiter = require("./middlewares/tokenBucketLimiter");
 const redis = new Redis(); // connected, but not used in this step
-
+app.use(tokenBucketLimiter);
 async function rateLimiter(req, res, next) {
   const userId = req.headers['user-id'];
 
@@ -50,6 +51,10 @@ async function rateLimiter(req, res, next) {
 // Apply middleware to this route
 app.get('/api/test', rateLimiter, (req, res) => {
   res.send('Request allowed!');
+});
+
+app.get('/api/token-bucket', tokenBucketLimiter, (req, res) => {
+  res.send('Token bucket request allowed!');
 });
 
 app.listen(PORT, () => {
